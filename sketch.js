@@ -6,8 +6,13 @@ let pipes = [];
 let populationSize = 200;
 let generation = 1;
 
-// Generation Speed Control
+// Enviroment Controls
 let timeSlider;
+let simFrameCount = 0;
+
+let difficultySlider;
+
+let showOneCheckbox;
 
 function setup() {
   createCanvas(640, 240);
@@ -17,32 +22,37 @@ function setup() {
   }
   pipes.push(new Pipe());
 
-  timeSlider = createSlider(1, 8, 1);
+  timeSlider = createSlider(1, 25, 1);
   timeSlider.position(10, 10); // Bottom right
-  
+
+  difficultySlider = createSlider(0.3, 1, 1, 0.1);
+  difficultySlider.position(150, 10); // Bottom right
+
   // Save/Load buttons
-  let saveButton = createButton('save');
+  let saveButton = createButton("save");
   saveButton.position(0, height);
   saveButton.mousePressed(saveBird);
-  
-//   let loadButton = createButton('load');
-//   loadButton.position(saveButton.width + 2, height);
-//   loadButton.mousePressed(loadBird);
-  
+
+  //   let loadButton = createButton('load');
+  //   loadButton.position(saveButton.width + 2, height);
+  //   loadButton.mousePressed(loadBird);
+
   loadButton = createFileInput(loadBrain, false);
   loadButton.position(saveButton.width + 2, height);
 
+  showOneCheckbox = createCheckbox("Show Mode");
+  showOneCheckbox.position(10, height + 25);
 }
 
 function loadBrain(file) {
-  console.log(file)
+  console.log(file);
   newBrain = ml5.neuralNetwork({
-        inputs: 4,
-        outputs: ["flap", "no flap"],
-        task: "classification",
-        neuroEvolution: true,
-      });
-  newBrain.load(file.name)
+    inputs: 4,
+    outputs: ["flap", "no flap"],
+    task: "classification",
+    neuroEvolution: true,
+  });
+  newBrain.load(file.name);
   newBird = birds.push(new Bird(newBrain));
 }
 
@@ -106,55 +116,88 @@ function reproduction() {
 // }
 
 function draw() {
+  // We draw a white background ONCE each real frame
   background(255);
-  for (let i = pipes.length - 1; i >= 0; i--) {
-    pipes[i].velocity = 2 * timeSlider.value();
-    pipes[i].update();
-    pipes[i].show();
-    if (pipes[i].offscreen()) {
-      pipes.splice(i, 1);
-    }
-  }
 
-  for (let bird of birds) {
-    if (bird.alive) {
-      for (let pipe of pipes) {
-        if (pipe.collides(bird)) {
-          bird.alive = false;
-        }
+  // We do multiple simulation steps per real frame
+  for (let n = 0; n < timeSlider.value(); n++) {
+    simFrameCount++;
+
+    // 1. Update existing pipes
+    for (let i = pipes.length - 1; i >= 0; i--) {
+      // pipes[i].velocity = 2 * timeSlider.value();
+      pipes[i].update();
+      if (pipes[i].offscreen()) {
+        pipes.splice(i, 1);
       }
-      for (let i = 0; i < timeSlider.value(); i++) {
+    }
+
+    // 2. Update birds
+    for (let bird of birds) {
+      if (bird.alive) {
+        // Check collisions
+        for (let pipe of pipes) {
+          if (pipe.collides(bird)) {
+            bird.alive = false;
+          }
+        }
         bird.think(pipes);
         bird.update();
       }
-      bird.show();
+    }
+
+    // 3. Spawn pipes based on *simulation* time
+    //    i.e., every "X" simulation-frames, not real frames
+    let spawnInterval = Math.floor(100 * difficultySlider.value());
+    if (spawnInterval < 1) spawnInterval = 1;
+    if (simFrameCount % spawnInterval === 0) {
+      pipes.push(new Pipe());
+    }
+
+    // 4. If all birds are dead, do your generation logic
+    if (allBirdsDead()) {
+      normalizeFitness();
+      reproduction();
+      resetPipes();
+      generation++;
+      // Reset simFrameCount if you like, or keep counting continuously
     }
   }
 
-  if (frameCount % (100/timeSlider.value()) == 0) {
-    pipes.push(new Pipe());
+  // Now that the "final" simulation state for this real frame is set,
+  // actually *render* pipes and birds once
+  for (let pipe of pipes) {
+    pipe.show();
+  }
+  for (let bird of birds) {
+    if (bird.alive) {
+      bird.show();
+      if (showOneCheckbox.checked()) {
+        break;
+      }
+    }
   }
 
-  if (allBirdsDead()) {
-    normalizeFitness();
-    reproduction();
-    resetPipes();
-    generation++
+  // Draw your text info
+  const aliveCount = birds.filter((bird) => bird.alive).length;
+  const fittestBird = birds.reduce(
+    (max, bird) => (bird.fitness > max.fitness ? bird : max),
+    birds[0]
+  );
+  textAlign(LEFT);
+  if (!showOneCheckbox.checked()) {
+    text("Number of Birds Alive: " + aliveCount, 10, 50);
+    text("Current Generation: " + generation, 10, 70);
+    text("Best Bird Lifespan: " + fittestBird.fitness, 10, 90);
   }
-  
-  // Simulation Information Display
-  const aliveCount = birds.filter(bird => bird.alive).length;
-  // Get the bird with the highest fitness
-const fittestBird = birds.reduce((max, bird) => (bird.fitness > max.fitness ? bird : max), birds[0]);
-  textAlign(LEFT)
-  text("Number of Birds Alive: " +  aliveCount, 10, 50)
-  text("Current Generation: " +  generation, 10, 70)
-  text("Best Bird Lifespan: " +  fittestBird.fitness, 10, 90)
 }
 
 function saveBird() {
-  const fittestBird = birds.reduce((max, bird) => (bird.fitness > max.fitness ? bird : max), birds[0]);
-  fittestBird.brain.save("BirdBrain_"+generation+"_"+fittestBird.fitness)
+  const fittestBird = birds.reduce(
+    (max, bird) => (bird.fitness > max.fitness ? bird : max),
+    birds[0]
+  );
+  fittestBird.brain.save("BirdBrain_" + generation + "_" + fittestBird.fitness);
 }
 
 function resetPipes() {
